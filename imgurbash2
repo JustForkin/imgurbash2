@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Copyright (c) 2016-2017 Ramon <https://github.com/ram-on/imgurbash2>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -23,8 +23,11 @@
 # AUTHORS:  Ramon <https://github.com/ram-on/imgurbash2>
 #           Originally written by Bart Nagel <bart@tremby.net>
 #           Config & auth logic inspired by https://github.com/jomo/imgur-screenshot/
-# REQUIRED: curl, jq
-# OPTIONAL: xsel or xclip for copying URLs to your clipboard (linux)
+# REQUIRED: curl
+# OPTIONAL:
+#	* xsel or xclip for copying URLs to your clipboard (Linux)
+#	* notify-send for notifications (Linux)
+#	* growlnotify or terminal-notifier for notifications (macOS)
 #--------------------------------------------------------------------
 #
 # The URLs will be output on your terminal. If you have xsel or xclip they
@@ -95,6 +98,33 @@ usage() {
     ${COLORS[GREEN]}Examples:${COLORS[OFF]}
         Refer to https://github.com/ram-on/imgurbash2
 "
+}
+
+
+#
+# Given a string it will try to extract its values (from the given JSON response).
+# E.g.  '"error":"Invalid client_id"' ==> string = "error", value = "Invalid client_id"
+#
+# Paramateres:
+#   $1 - Response JSON.
+#   $2 - 'String' (not datatype) which will be used to get the value from.
+#
+function get_value_from_response() {
+	sed -e 's/.*\"'$2'\":"\([^"]*\).*/\1/' <<< "$1"
+}
+
+
+#
+# Given a string it will try to extract its values that are not enclosed by
+# commas (from the given JSON response).
+# E.g.  '"status":200' ==> string = "status", value = "200"
+#
+# Paramateres:
+#   $1 - Response JSON.
+#   $2 - 'String' (not datatype) which will be used to get the value from.
+#
+function get_value_from_response_no_inverted_commas() {
+	sed -e 's/.*\"'$2'\":\([^,}]*\).*/\1/' <<< "$1"
 }
 
 
@@ -268,9 +298,9 @@ upload_images() {
 		is_request_success "$response" || { err "uploading [$file] failed"; HAS_ERRORS=1; continue; }
 
 		# get image url link
-		url="$(jq -r .data.link <<< "$response")"
+		url=$(get_value_from_response "$response" "link" | sed -e 's/\\//g')
 		is_valid_url "$url" || err "uploaded image resulted in [$url] link"
-		dhash="$(jq -r .data.deletehash <<< "$response")"
+		dhash=$(get_value_from_response "$response" "deletehash")
 		is_null_or_empty "$dhash" && err "no deletehash found in image [$file] upload response [$response]"
 
 		info "[$file] uploaded: $url deletehash=[$dhash] (https://imgur.com/delete/${dhash})"
@@ -315,10 +345,11 @@ is_request_success() {
 
 	response="$1"
 
-	status="$(jq -r .status <<< "$response")"
-	success="$(jq -r .success <<< "$response")"
+	status=$(get_value_from_response_no_inverted_commas "$response" "status")
+	success=$(get_value_from_response_no_inverted_commas "$response" "success")
 
 	if [[ "$success" != true ]]; then
+		echo "$response" > ~/tmp/resp_err
 		err -N "request failed with status [$status]: $(jq -r .data.error <<< "$response")"
 		return 1
 	fi
@@ -635,4 +666,3 @@ else
 fi
 
 exit $HAS_ERRORS
-
